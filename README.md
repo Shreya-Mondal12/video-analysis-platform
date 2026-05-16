@@ -1,4 +1,4 @@
-#  VisionCat — Video Analysis Platform
+#  VisionTrack — Video Analysis Platform
 
 A full-stack video analysis platform that detects cat presence in video frames using **YOLOv8** — runs fully locally, no API key needed, no cost per frame.
 
@@ -264,8 +264,8 @@ CREATE TABLE frame_predictions (
 ### Docker
 
 ```bash
-docker build -t visioncat .
-docker run -p 8000:8000 visioncat
+docker build -t VisionTrack .
+docker run -p 8000:8000 VisionTrack
 ```
 
 The Dockerfile installs ffmpeg, Python + ultralytics, and Node in one image.
