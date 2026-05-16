@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import './App.css'
-
-const API = ''
+const API = import.meta.env.VITE_API_URL
 
 function formatDuration(s) {
   if (!s) return '0:00'
@@ -181,11 +180,11 @@ function VideoDetail({ videoId, onDeleted }) {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [vRes, sRes] = await Promise.all([fetch(`/api/videos/${videoId}`), fetch(`/api/videos/${videoId}/status`)])
+      const [vRes, sRes] = await Promise.all([fetch(`${API}/api/videos/${videoId}`), fetch(`${API}/api/videos/${videoId}/status`)])
       const v = await vRes.json(); const s = await sRes.json()
       setVideo(v); setStatus(s)
       if (s.status === 'completed') {
-        const pRes = await fetch(`/api/videos/${videoId}/predictions`)
+        const pRes = await fetch(`${API}/api/videos/${videoId}/predictions`)
         setPredictions(await pRes.json())
       }
       return s.status
@@ -207,7 +206,7 @@ function VideoDetail({ videoId, onDeleted }) {
 
   const handleDelete = async () => {
     if (!confirm('Delete this video?')) return
-    await fetch(`/api/videos/${videoId}`, { method: 'DELETE' })
+    await fetch(`${API}/api/videos/${videoId}`, { method: 'DELETE' })
     onDeleted()
   }
 
@@ -251,7 +250,7 @@ export default function App() {
 
   const fetchVideos = useCallback(async () => {
     try {
-      const r = await fetch('/api/videos')
+      const r = await fetch(`${API}/api/videos`)
       setVideos(await r.json())
     } catch(e) { console.error(e) }
   }, [])
@@ -264,7 +263,7 @@ export default function App() {
 
   const handleUploaded = (video) => { fetchVideos(); setSelectedId(video.id) }
   const handleDelete = async (id) => {
-    await fetch(`/api/videos/${id}`, { method: 'DELETE' })
+    await fetch(`${API}/api/videos/${id}`, { method: 'DELETE' })
     if (selectedId === id) setSelectedId(null)
     fetchVideos()
   }
