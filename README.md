@@ -280,15 +280,3 @@ The Dockerfile installs ffmpeg, Python + ultralytics, and Node in one image.
 6. Mount a persistent disk at `/app/uploads` so videos survive redeploys
 
 ---
-
-## Engineering Decisions
-
-**Express.js over FastAPI** — Node's non-blocking event loop handles concurrent uploads and status polling naturally. setImmediate() runs background video processing without blocking HTTP responses. Multer handles streaming multipart uploads cleanly.
-
-**sql.js over sqlite3/better-sqlite3** — avoids node-gyp native compilation which fails on many machines without build tools. sql.js is pure JavaScript and works anywhere Node.js does.
-
-**Python sidecar for YOLO** — YOLO is Python-native. Spawning python detect.py per frame is simpler and more debuggable than JS bindings. Each process is isolated — a crash on one frame doesn't kill the pipeline.
-
-**YOLOv8n specifically** — the nano variant is ~6MB and runs in ~30ms per frame on CPU. Larger variants (s, m, l, x) are more accurate but slower. For cat detection on typical home video, nano achieves 92-94% confidence.
-
-**Frames deleted after inference** — extracted JPEGs are removed immediately after YOLO processes them to avoid filling disk space on longer videos.
