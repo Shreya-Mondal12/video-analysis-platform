@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+
+# Database
+*.db
+*.sqlite3
+
+# Uploads & generated files
+backend/uploads/
+backend/thumbnails/
+backend/frames/
+
+# Frontend build
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
