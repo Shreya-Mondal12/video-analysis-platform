@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import './App.css'
-const API = import.meta.env.VITE_API_URL || ''
+
+const API = ''
 
 function formatDuration(s) {
   if (!s) return '0:00'
