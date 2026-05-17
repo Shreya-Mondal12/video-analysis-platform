@@ -13,112 +13,6 @@ for (const d of [UPLOADS_DIR, THUMBNAILS_DIR, FRAMES_DIR]) {
 
 const DETECT_SCRIPT = path.join(__dirname, 'detect.py');
 
-// ── Persistent YOLO sidecar ─────────────────────────────────────────────────────
-let _proc = null;
-let _ready = false;
-let _readyCallbacks = [];
-let _pendingResolves = [];
-let _buf = '';
-
-function getSidecar() {
-  if (_proc) return _proc;
-  const py = process.platform === 'win32' ? 'python' : 'python3';
-  _proc = spawn(py, [DETECT_SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
-  _buf = '';
-
-  _proc.stdout.on('data', (chunk) => {
-    _buf += chunk.toString();
-    const lines = _buf.split('\n');
-    _buf = lines.pop();
-    for (const line of lines) {
-  const trimmed = line.trim();
-
-  if (!trimmed) continue;
-
-  // Ignore non-JSON logs/warnings
-  if (!trimmed.startsWith('{')) {
-    continue;
-  }
-
-  let msg;
-
-  try {
-    msg = JSON.parse(trimmed);
-  } catch (e) {
-    console.error('[YOLO] bad JSON:', trimmed.slice(0, 100));
-
-    const r = _pendingResolves.shift();
-
-    if (r) {
-      r({
-        label: 'cat_not_present',
-        confidence: 0.0
-      });
-    }
-
-    continue;
-  }
-      if (msg.ready) {
-        _ready = true;
-        console.log('[YOLO] sidecar ready');
-        _readyCallbacks.forEach(cb => cb());
-        _readyCallbacks = [];
-      } else {
-        const r = _pendingResolves.shift();
-        if (r) r(msg);
-      }
-    }
-  });
-
-  _proc.stderr.on('data', (d) => {
-    const t = d.toString().trim();
-    if (
-  t.includes('detected:') ||
-  t.includes('loading model')
-) {
-  console.log('[YOLO]', t);
-}
-  });
-
-  _proc.on('close', (code) => {
-    console.warn(`[YOLO] exited (${code}), restarting on next request`);
-    _proc = null; _ready = false;
-    _pendingResolves.forEach(r => r({ label: 'cat_not_present', confidence: 0.0 }));
-    _pendingResolves = [];
-  });
-
-  _proc.on('error', (err) => {
-    console.error('[YOLO] spawn error:', err.message);
-    _proc = null; _ready = false;
-  });
-
-  return _proc;
-}
-
-function classifyFrame(imagePath) {
-  return new Promise((resolve) => {
-    const proc = getSidecar();
-    const run = () => {
-      _pendingResolves.push(resolve);
-      proc.stdin.write(imagePath + '\n');
-    };
-    if (_ready) {
-      run();
-    } else {
-      let fired = false;
-      const timer = setTimeout(() => {
-        if (!fired) { fired = true; console.error('[YOLO] ready timeout'); resolve({ label: 'cat_not_present', confidence: 0.0 }); }
-      }, 20000);
-      _readyCallbacks.push(() => {
-        if (!fired) { fired = true; clearTimeout(timer); run(); }
-      });
-    }
-  });
-}
-
-// Pre-warm on startup
-getSidecar();
-
 // ── Video Metadata ──────────────────────────────────────────────────────────────
 function getVideoMetadata(filePath) {
   return new Promise((resolve, reject) => {
@@ -152,7 +46,7 @@ function extractFrame(filePath, timestamp, outputPath) {
     ffmpeg(filePath)
       .seekInput(timestamp)
       .frames(1)
-      .outputOptions(['-vf', 'scale=416:416:force_original_aspect_ratio=decrease,pad=640:640:(ow-iw)/2:(oh-ih)/2'])
+      .size('512x?')
       .output(outputPath)
       .on('end', () => resolve(outputPath))
       .on('error', reject)
@@ -160,16 +54,67 @@ function extractFrame(filePath, timestamp, outputPath) {
   });
 }
 
+// ── YOLO via Python sidecar ─────────────────────────────────────────────────────
+function classifyFrameWithYOLO(imagePath) {
+  return new Promise((resolve) => {
+    const fallback = { label: 'cat_not_present', confidence: 0.0 };
+    const py = spawn(process.platform === 'win32' ? 'python' : 'python3', [DETECT_SCRIPT, imagePath]);
+    let stdout = '';
+    let stderr = '';
+    py.stdout.on('data', chunk => stdout += chunk.toString());
+    py.stderr.on('data', chunk => stderr += chunk.toString());
+    py.on('close', () => {
+
+  if (stderr) {
+    console.error('YOLO stderr:', stderr.slice(0, 500));
+  }
+
+  try {
+    const line = stdout.trim().split('\n').pop();
+
+    const result = JSON.parse(line);
+
+    if (result.error) {
+      console.warn('YOLO sidecar warning:', result.error);
+    }
+
+    resolve({
+      label: result.label || fallback.label,
+      confidence:
+        typeof result.confidence === 'number'
+          ? result.confidence
+          : 0.0,
+    });
+
+  } catch (e) {
+
+    console.error(
+      'YOLO parse error:',
+      e.message,
+      stdout.slice(0, 200)
+    );
+
+    resolve(fallback);
+  }
+});
+    py.on('error', err => { console.error('Failed to spawn python3:', err.message); resolve(fallback); });
+    setTimeout(() => { py.kill(); resolve(fallback); }, 30000);
+  });
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
 // ── Main pipeline ───────────────────────────────────────────────────────────────
 async function processVideo(videoId, filePath, { dbGet, dbRun, dbAll, saveDb }) {
   const now = () => new Date().toISOString();
   try {
     dbRun(`UPDATE processing_jobs SET status='processing', started_at=? WHERE video_id=?`, [now(), videoId]);
+
     const { fps, duration } = await getVideoMetadata(filePath);
     const timestamps = [];
     for (let t = 0; t < duration; t += 1) timestamps.push(parseFloat(t.toFixed(2)));
+
     dbRun(`UPDATE processing_jobs SET total_frames=? WHERE video_id=?`, [timestamps.length, videoId]);
-    console.log(`[Video ${videoId}] ${timestamps.length} frames to process`);
 
     for (let i = 0; i < timestamps.length; i++) {
       const ts = timestamps[i];
@@ -177,15 +122,14 @@ async function processVideo(videoId, filePath, { dbGet, dbRun, dbAll, saveDb }) 
       const framePath = path.join(FRAMES_DIR, `${videoId}_${frameNum}.jpg`);
       try {
         await extractFrame(filePath, ts, framePath);
-        const result = await classifyFrame(framePath);
-        console.log(`[Video ${videoId}] t=${ts}s → ${result.label} (${(result.confidence*100).toFixed(0)}%)`);
+        const result = await classifyFrameWithYOLO(framePath);
         dbRun(
           `INSERT INTO frame_predictions (video_id, timestamp, frame_number, label, confidence) VALUES (?, ?, ?, ?, ?)`,
           [videoId, ts, frameNum, result.label, result.confidence]
         );
         fs.unlink(framePath, () => {});
       } catch (frameErr) {
-        console.error(`[Video ${videoId}] frame error at ${ts}s:`, frameErr.message);
+        console.error(`Frame error at ${ts}s:`, frameErr.message);
         dbRun(
           `INSERT INTO frame_predictions (video_id, timestamp, frame_number, label, confidence) VALUES (?, ?, ?, ?, ?)`,
           [videoId, ts, frameNum, 'cat_not_present', 0.0]
@@ -195,9 +139,9 @@ async function processVideo(videoId, filePath, { dbGet, dbRun, dbAll, saveDb }) 
     }
 
     dbRun(`UPDATE processing_jobs SET status='completed', completed_at=? WHERE video_id=?`, [now(), videoId]);
-    console.log(`✅ Video ${videoId} done`);
+    console.log(`✅  Video ${videoId} done — ${timestamps.length} frames via YOLO`);
   } catch (err) {
-    console.error(`❌ Video ${videoId} failed:`, err.message);
+    console.error(`❌  Video ${videoId} failed:`, err.message);
     dbRun(`UPDATE processing_jobs SET status='failed', error_message=? WHERE video_id=?`, [err.message, videoId]);
   }
 }
