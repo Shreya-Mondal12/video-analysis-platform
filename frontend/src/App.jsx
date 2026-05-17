@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import './App.css'
 
-const API =''
+const API = import.meta.env.VITE_API_URL || ''
 
 function formatDuration(s) {
   if (!s) return '0:00'
@@ -38,7 +38,7 @@ function UploadZone({ onUploaded }) {
     const form = new FormData()
     form.append('file', file)
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', `/api/videos`)
+    xhr.open('POST', `${API}/api/videos`)
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) setProgress(Math.round(e.loaded/e.total*90)) }
     xhr.onload = () => {
       setProgress(100)
@@ -85,7 +85,7 @@ function VideoItem({ video, active, onClick, onDelete }) {
   return (
     <div className={`video-item ${active ? 'active' : ''}`} onClick={onClick}>
       {video.thumbnail_url
-        ? <img src={video.thumbnail_url} className="video-thumb" alt="" />
+        ? <img src={`${API}${video.thumbnail_url}`} className="video-thumb" alt="" />
         : <div className="video-thumb-placeholder">▶</div>}
       <div className="video-info">
         <div className="video-name" title={video.original_name}>{video.original_name}</div>
@@ -181,11 +181,11 @@ function VideoDetail({ videoId, onDeleted }) {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [vRes, sRes] = await Promise.all([fetch(`/api/videos/${videoId}`), fetch(`/api/videos/${videoId}/status`)])
+      const [vRes, sRes] = await Promise.all([fetch(`${API}/api/videos/${videoId}`), fetch(`${API}/api/videos/${videoId}/status`)])
       const v = await vRes.json(); const s = await sRes.json()
       setVideo(v); setStatus(s)
       if (s.status === 'completed') {
-        const pRes = await fetch(`/api/videos/${videoId}/predictions`)
+        const pRes = await fetch(`${API}/api/videos/${videoId}/predictions`)
         setPredictions(await pRes.json())
       }
       return s.status
@@ -207,7 +207,7 @@ function VideoDetail({ videoId, onDeleted }) {
 
   const handleDelete = async () => {
     if (!confirm('Delete this video?')) return
-    await fetch(`/api/videos/${videoId}`, { method: 'DELETE' })
+    await fetch(`${API}/api/videos/${videoId}`, { method: 'DELETE' })
     onDeleted()
   }
 
@@ -230,7 +230,7 @@ function VideoDetail({ videoId, onDeleted }) {
       </div>
       <div className="video-player-section">
         <div className="video-player-wrap">
-          <video controls src={`/uploads/${video.filename}`} />
+          <video controls src={`${API}/uploads/${video.filename}`} />
         </div>
         <div className="video-stats-bar">
           <div className="stat-item"><span className="stat-label">Duration</span><span className="stat-value">{formatDuration(video.duration)}</span></div>
@@ -251,7 +251,7 @@ export default function App() {
 
   const fetchVideos = useCallback(async () => {
     try {
-      const r = await fetch('/api/videos')
+      const r = await fetch(`${API}/api/videos`)
       setVideos(await r.json())
     } catch(e) { console.error(e) }
   }, [])
@@ -264,7 +264,7 @@ export default function App() {
 
   const handleUploaded = (video) => { fetchVideos(); setSelectedId(video.id) }
   const handleDelete = async (id) => {
-    await fetch(`/api/videos/${id}`, { method: 'DELETE' })
+    await fetch(`${API}/api/videos/${id}`, { method: 'DELETE' })
     if (selectedId === id) setSelectedId(null)
     fetchVideos()
   }
