@@ -31,15 +31,33 @@ function getSidecar() {
     const lines = _buf.split('\n');
     _buf = lines.pop();
     for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      let msg;
-      try { msg = JSON.parse(trimmed); } catch (e) {
-        console.error('[YOLO] bad JSON:', trimmed.slice(0, 100));
-        const r = _pendingResolves.shift();
-        if (r) r({ label: 'cat_not_present', confidence: 0.0 });
-        continue;
-      }
+  const trimmed = line.trim();
+
+  if (!trimmed) continue;
+
+  // Ignore non-JSON logs/warnings
+  if (!trimmed.startsWith('{')) {
+    continue;
+  }
+
+  let msg;
+
+  try {
+    msg = JSON.parse(trimmed);
+  } catch (e) {
+    console.error('[YOLO] bad JSON:', trimmed.slice(0, 100));
+
+    const r = _pendingResolves.shift();
+
+    if (r) {
+      r({
+        label: 'cat_not_present',
+        confidence: 0.0
+      });
+    }
+
+    continue;
+  }
       if (msg.ready) {
         _ready = true;
         console.log('[YOLO] sidecar ready');
@@ -54,7 +72,12 @@ function getSidecar() {
 
   _proc.stderr.on('data', (d) => {
     const t = d.toString().trim();
-    if (t) console.log('[YOLO]', t);
+    if (
+  t.includes('detected:') ||
+  t.includes('loading model')
+) {
+  console.log('[YOLO]', t);
+}
   });
 
   _proc.on('close', (code) => {
@@ -85,7 +108,7 @@ function classifyFrame(imagePath) {
       let fired = false;
       const timer = setTimeout(() => {
         if (!fired) { fired = true; console.error('[YOLO] ready timeout'); resolve({ label: 'cat_not_present', confidence: 0.0 }); }
-      }, 60000);
+      }, 20000);
       _readyCallbacks.push(() => {
         if (!fired) { fired = true; clearTimeout(timer); run(); }
       });
@@ -129,7 +152,7 @@ function extractFrame(filePath, timestamp, outputPath) {
     ffmpeg(filePath)
       .seekInput(timestamp)
       .frames(1)
-      .outputOptions(['-vf', 'scale=640:640:force_original_aspect_ratio=decrease,pad=640:640:(ow-iw)/2:(oh-ih)/2'])
+      .outputOptions(['-vf', 'scale=416:416:force_original_aspect_ratio=decrease,pad=640:640:(ow-iw)/2:(oh-ih)/2'])
       .output(outputPath)
       .on('end', () => resolve(outputPath))
       .on('error', reject)
